@@ -84,27 +84,37 @@ app.post('/api/generate-quiz-from-document', upload.single('file'), async (req, 
       return res.status(500).json({ error: 'Groq API key not configured' });
     }
 
-    const prompt = `Based on the following document content, generate ${numQuestions} multiple choice quiz questions.
+    const prompt = `You are a quiz generator. Based on the following document content, generate exactly ${numQuestions} multiple choice quiz questions with realistic, meaningful options derived from the document.
 
 DOCUMENT CONTENT:
 ---
 ${limitedText}
 ---
 
-Generate quiz questions in this JSON format:
+INSTRUCTIONS:
+- Extract key facts, concepts, and terms from the document
+- Create questions that test understanding of the document content
+- For EACH question, generate 4 REALISTIC options (never use "Option A", "Option B", etc.)
+- One option must be the correct answer
+- Three options should be plausible but incorrect alternatives
+- Options should be actual terms/concepts from the document or logically related distractors
+- The "correct" field MUST exactly match one of the 4 options
+
+Generate the questions in this EXACT JSON format:
 [
   {
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct": "Correct answer text"
+    "question": "What is the primary function of photosynthesis?",
+    "options": ["Convert light energy to chemical energy", "Break down glucose", "Produce oxygen only", "Store nitrogen"],
+    "correct": "Convert light energy to chemical energy"
+  },
+  {
+    "question": "Which component is essential for photosynthesis?",
+    "options": ["Chlorophyll", "Mitochondria", "Ribosome", "Nucleus"],
+    "correct": "Chlorophyll"
   }
 ]
 
-Requirements:
-- Questions must be based on the document content
-- Each question should have exactly 4 options
-- The "correct" field should match one of the options exactly
-- Return ONLY valid JSON, no other text`;
+Return ONLY valid JSON array. Do not include any text before or after the JSON.`;
 
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -113,7 +123,7 @@ Requirements:
         messages: [
           {
             role: 'system',
-            content: 'You are a quiz generator. Generate quiz questions based on document content. Always respond with valid JSON only.'
+            content: 'You are an expert quiz generator. You extract key information from documents and create meaningful multiple-choice questions with realistic options. Always respond with ONLY valid JSON, no additional text.'
           },
           {
             role: 'user',
@@ -143,6 +153,15 @@ Requirements:
       } else {
         throw new Error('Failed to parse AI response as JSON');
       }
+    }
+
+    // Validate that we got meaningful options, not placeholders
+    const hasPlaceholders = questions.some(q => 
+      (q.options || []).some(opt => /^option\s+[a-d]$/i.test(opt.trim()))
+    );
+
+    if (hasPlaceholders) {
+      throw new Error('Generated questions contain placeholder options. Please try again.');
     }
 
     res.json({ 
@@ -193,7 +212,7 @@ app.post('/api/generate-cards-from-document', upload.single('file'), async (req,
       return res.status(500).json({ error: 'Groq API key not configured' });
     }
 
-    const prompt = `Based on the following document content, generate ${count} flashcard question-answer pairs.
+    const prompt = `Based on the following document content, generate exactly ${count} flashcard question-answer pairs.
 
 DOCUMENT CONTENT:
 ---
@@ -269,6 +288,7 @@ Requirements:
 
 /**
  * Generate quiz questions using OpenAI API (topic-based)
+ */
 app.post('/api/generate-quiz', async (req, res) => {
   try {
     const { topic, numQuestions = 5 } = req.body;
@@ -282,18 +302,24 @@ app.post('/api/generate-quiz', async (req, res) => {
       return res.status(500).json({ error: 'Groq API key not configured' });
     }
 
-    const prompt = `Generate ${numQuestions} multiple choice quiz questions about "${topic}". 
+    const prompt = `Generate exactly ${numQuestions} multiple choice quiz questions about "${topic}". 
+
+For each question, provide 4 realistic, meaningful options where one is correct and three are plausible alternatives.
     
 Format your response as a JSON array with this structure:
 [
   {
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct": "Correct answer text"
+    "question": "What is the capital of France?",
+    "options": ["Paris", "London", "Berlin", "Madrid"],
+    "correct": "Paris"
   }
 ]
 
-Return ONLY valid JSON, no other text.`;
+Requirements:
+- Create questions that test core knowledge of the topic
+- Options must be realistic and meaningful (never use "Option A", "Option B", etc.)
+- The "correct" field must exactly match one of the 4 options
+- Return ONLY valid JSON array, no other text`;
 
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -302,7 +328,7 @@ Return ONLY valid JSON, no other text.`;
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful quiz generator. Always respond with valid JSON only.'
+            content: 'You are a helpful quiz generator. Create meaningful quiz questions with realistic options. Always respond with valid JSON only.'
           },
           {
             role: 'user',
@@ -326,7 +352,6 @@ Return ONLY valid JSON, no other text.`;
     try {
       questions = JSON.parse(content);
     } catch (e) {
-      // Try to extract JSON from the response
       const jsonMatch = content.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         questions = JSON.parse(jsonMatch[0]);
@@ -587,6 +612,8 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       health: 'GET /api/health',
+      generateQuizFromDocument: 'POST /api/generate-quiz-from-document',
+      generateCardsFromDocument: 'POST /api/generate-cards-from-document',
       generateQuiz: 'POST /api/generate-quiz',
       generateCards: 'POST /api/generate-cards',
       createQuiz: 'POST /api/quizzes',
